@@ -8,11 +8,6 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/**'
-    paths-ignore:
-      - 'README.md'
-      - 'assets/**'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
     branches: [ 'main' ]
     paths:
@@ -20,11 +15,6 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/**'
-    paths-ignore:
-      - 'README.md'
-      - 'assets/**'
-      - 'LICENSE'
-      - '.gitignore'
 
 env:
   CARGO_TERM_COLOR: always
