@@ -21,22 +21,26 @@ You can challenge and play against the engine live on Lichess: [@Athena-ChessBot
 ## Features
 
 - **Search Architecture:**
-  - Iterative Deepening with Aspiration Windows
-  - Principal Variation Search (PVS / NegaScout) with zero-window search
-  - Quiescence Search with Stand-pat pruning
-  - Late Move Reductions (LMR) for late quiet branches
+  - Iterative Deepening with dynamic Aspiration Windows
+  - Principal Variation Search (PVS / NegaScout) with null-window search and full re-search
+  - Static Exchange Evaluation (SEE) pruning in Quiescence Search
+  - Reverse Futility Pruning (RFP) & Futility Pruning at shallow depths
+  - Late Move Reductions (LMR) for quiet non-tactical moves
   - Persistent Transposition Table (24 MB, 1M entries) across moves with depth-preferred replacement
   - Killer Move Heuristic & History Heuristic
-  - MVV-LVA (Most Valuable Victim - Least Valuable Aggressor) move ordering
-  - Threefold Repetition & 50-move draw detection with Contempt factor (avoids repetition when winning, forces repetition when losing)
+  - SEE-enhanced MVV-LVA move ordering
+  - Threefold Repetition & 50-move draw detection with Contempt factor
 
 - **Evaluation:**
   - Tapered Evaluation (Middlegame vs Endgame phase interpolation)
-  - Active King centralisation in endgames & King Safety / Pawn Shield in middlegames
-  - Precomputed 64-bit Bitboard evaluation for Passed Pawns and Open/Semi-open Rook Files
+  - Safe Piece Mobility evaluation for Knights, Bishops, and Rooks
+  - Knight Outpost bonuses on central files
+  - Precomputed 64-bit Bitboard evaluation for Passed and Connected Pawns
+  - Open & Semi-open Rook File bonuses
   - Bishop pair bonuses and development harmony penalties
-  - Mating endgame king drive (driving opponent king to edges/corners)
-  - Built-in opening book
+  - King Safety with pawn shield & Luft detection
+  - Endgame mating king-drive (driving opponent king to edges/corners)
+  - Built-in randomized opening book
 
 - **Speed:**
   - ~3.7 - 4.0 Million NPS (Nodes Per Second) in release mode
@@ -44,7 +48,7 @@ You can challenge and play against the engine live on Lichess: [@Athena-ChessBot
 
 ## Building
 
-Requires Rust (edition 2021):
+Requires Rust:
 
 ```bash
 cargo build --release
@@ -58,16 +62,20 @@ Athena implements the standard UCI protocol and works with any chess GUI (Arena,
 
 ```bash
 ./athena-chess
-uci
-isready
-position startpos moves e2e4 e7e5
-go movetime 1000
 ```
 
-## Credits
+```text
+uci
+isready
+ucinewgame
+position startpos moves e2e4 e7e5
+go wtime 300000 btime 300000
+```
 
-- Logo artwork: *Athena* by [Cynthia Sheppard](https://www.cynthia-sheppard.com/athena).
+## Artwork Credit
+
+Logo artwork: Athena by [Cynthia Sheppard](https://www.cynthia-sheppard.com/athena). Used with appreciation.
 
 ## License
 
-GNU General Public License v3.0 (see [LICENSE](LICENSE)).
+GNU General Public License v3.0 (GPL-3.0)
