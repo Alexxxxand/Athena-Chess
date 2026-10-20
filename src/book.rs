@@ -149,18 +149,44 @@ fn init_book() -> HashMap<&'static str, &'static [&'static str]> {
     m
 }
 
-/// Checks opening book for a known move in the current position
+/// Checks opening book for a known move in the current position, randomly selecting among choices
 pub fn get_book_move(board: &Board) -> Option<ChessMove> {
     let book = BOOK.get_or_init(init_book);
     let fen = format!("{}", board);
 
     if let Some(&moves) = book.get(fen.as_str()) {
         if !moves.is_empty() {
-            let chosen_str = moves[0];
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            let mut seed = board.get_hash() ^ nanos;
+            seed ^= seed >> 12;
+            seed ^= seed << 25;
+            seed ^= seed >> 27;
+            seed = seed.wrapping_mul(0x2545F4914F6CDD1D);
+
+            let idx = (seed as usize) % moves.len();
+            let chosen_str = moves[idx];
             if let Ok(mv) = ChessMove::from_str(chosen_str) {
                 return Some(mv);
             }
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_opening_book_returns_legal_moves() {
+        let board = Board::default();
+        let mv = get_book_move(&board);
+        assert!(mv.is_some());
+        let mv = mv.unwrap();
+        let legal_moves: Vec<ChessMove> = chess::MoveGen::new_legal(&board).collect();
+        assert!(legal_moves.contains(&mv), "Book move must be legal");
+    }
 }
