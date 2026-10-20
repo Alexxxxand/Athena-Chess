@@ -86,13 +86,14 @@ jobs:
       - name: Release
         uses: ncipollo/release-action@v1
         with:
-          name: 'Nightly Build ${{ steps.vars.outputs.short_sha }}'
-          tag: 'prerelease-${{ steps.vars.outputs.short_sha }}'
-          prerelease: true
+          name: 'Athena-Chess ${{ steps.vars.outputs.short_sha }}'
+          tag: 'v${{ steps.vars.outputs.short_sha }}'
+          prerelease: false
+          makeLatest: true
           allowUpdates: true
           artifacts: 'release-assets/*'
           body: |
-            Automatic build of Athena-Chess from commit ${{ steps.vars.outputs.short_sha }}.
+            Stable build of Athena-Chess from commit ${{ steps.vars.outputs.short_sha }}.
 
             ### Artifacts
             - Windows: `athena-chess-windows-x86_64.exe`
