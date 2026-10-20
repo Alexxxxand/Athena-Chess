@@ -46,8 +46,8 @@ impl UciHandler {
             let tokens: Vec<&str> = line.split_whitespace().collect();
             match tokens[0] {
                 "uci" => {
-                    println!("id name AthenaChess 0.1");
-                    println!("id author Sanya");
+                    println!("id name AthenaChess");
+                    println!("id author alexxxxand");
                     println!("uciok");
                 }
                 "isready" => {

@@ -1,6 +1,7 @@
 [package]
 name = "athena-chess"
 version = "0.1.0"
+authors = ["alexxxxand"]
 edition = "2024"
 
 [dependencies]
