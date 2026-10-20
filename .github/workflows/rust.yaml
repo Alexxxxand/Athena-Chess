@@ -1,0 +1,100 @@
+name: Rust
+
+on:
+  push:
+    branches: [ 'main' ]
+    paths:
+      - '**.rs'
+      - '**.yaml'
+      - '**.yml'
+      - '**.toml'
+      - '**.lock'
+  pull_request:
+    branches: [ 'main' ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: athena-chess.exe
+            release_name: athena-chess-windows-x86_64.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: athena-chess
+            release_name: athena-chess-linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: athena-chess
+            release_name: athena-chess-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build
+        run: cargo build --release --verbose --target ${{ matrix.target }}
+
+      - name: Stage Artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/${{ matrix.release_name }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.release_name }}
+          path: dist/${{ matrix.release_name }}
+
+  release:
+    name: Create Release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Get commit hash
+        id: vars
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Release
+        uses: ncipollo/release-action@v1
+        with:
+          name: 'Nightly Build ${{ steps.vars.outputs.short_sha }}'
+          tag: 'prerelease-${{ steps.vars.outputs.short_sha }}'
+          prerelease: true
+          allowUpdates: true
+          artifacts: 'release-assets/*'
+          body: |
+            Automatic build of Athena-Chess from commit ${{ steps.vars.outputs.short_sha }}.
+
+            ### Artifacts
+            - Windows: `athena-chess-windows-x86_64.exe`
+            - Linux: `athena-chess-linux-x86_64`
+            - macOS (Apple Silicon): `athena-chess-macos-arm64`
