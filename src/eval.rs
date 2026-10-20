@@ -1,4 +1,4 @@
-use chess::{Board, Color, File, Piece, Rank, Square};
+use chess::{BitBoard, Board, Color, File, Piece, Rank, Square, get_bishop_moves, get_knight_moves, get_rook_moves};
 
 pub const PAWN_VALUE: i32 = 100;
 pub const KNIGHT_VALUE: i32 = 320;
@@ -183,6 +183,37 @@ fn passed_pawn_bonus(rank_idx: usize, color: Color) -> i32 {
         6 => 280,
         _ => 0,
     }
+}
+
+#[inline]
+fn is_connected_passed_pawn(square: Square, color: Color, our_pawns: u64) -> bool {
+    let file = square.get_file().to_index();
+    let rank = square.get_rank().to_index();
+
+    let adj_files = [
+        if file > 0 { Some(file - 1) } else { None },
+        if file < 7 { Some(file + 1) } else { None },
+    ];
+
+    for f_opt in adj_files {
+        if let Some(f) = f_opt {
+            let ranks_to_check = match color {
+                Color::White => [Some(rank), if rank > 0 { Some(rank - 1) } else { None }],
+                Color::Black => [Some(rank), if rank < 7 { Some(rank + 1) } else { None }],
+            };
+
+            for r_opt in ranks_to_check {
+                if let Some(r) = r_opt {
+                    let bit = 1u64 << (r * 8 + f);
+                    if (our_pawns & bit) != 0 {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// King safety and pawn shield evaluation
@@ -424,6 +455,52 @@ fn evaluate_mating_endgame(
     bonus
 }
 
+fn evaluate_mobility_and_outposts(
+    board: &Board,
+    color: Color,
+    safe_squares: BitBoard,
+    our_pawn_attacks: BitBoard,
+) -> i32 {
+    let mut score = 0;
+    let our_pieces = board.color_combined(color);
+    let occupied = *board.combined();
+
+    // Knights: safe moves + outpost bonus
+    let knights = board.pieces(Piece::Knight) & our_pieces;
+    for sq in knights {
+        let moves = get_knight_moves(sq) & safe_squares & !our_pieces;
+        score += (moves.popcnt() as i32) * 4;
+
+        let file = sq.get_file().to_index();
+        let rank = sq.get_rank().to_index();
+        let is_central_file = file >= 2 && file <= 5;
+        let is_advanced_rank = match color {
+            Color::White => rank >= 3 && rank <= 5,
+            Color::Black => rank >= 2 && rank <= 4,
+        };
+
+        if is_central_file && is_advanced_rank && (BitBoard::from_square(sq) & our_pawn_attacks).0 != 0 {
+            score += 25;
+        }
+    }
+
+    // Bishops: safe diagonal moves
+    let bishops = board.pieces(Piece::Bishop) & our_pieces;
+    for sq in bishops {
+        let moves = get_bishop_moves(sq, occupied) & safe_squares & !our_pieces;
+        score += (moves.popcnt() as i32) * 4;
+    }
+
+    // Rooks: safe orthogonal moves
+    let rooks = board.pieces(Piece::Rook) & our_pieces;
+    for sq in rooks {
+        let moves = get_rook_moves(sq, occupied) & safe_squares & !our_pieces;
+        score += (moves.popcnt() as i32) * 2;
+    }
+
+    score
+}
+
 pub fn evaluate(board: &Board) -> i32 {
     let mut white_score = 0;
     let mut black_score = 0;
@@ -463,7 +540,11 @@ pub fn evaluate(board: &Board) -> i32 {
                     }
 
                     if piece == Piece::Pawn && is_passed_pawn(square_idx, Color::White, black_pawns) {
-                        white_score += passed_pawn_bonus(square.get_rank().to_index(), Color::White);
+                        let mut bonus = passed_pawn_bonus(square.get_rank().to_index(), Color::White);
+                        if is_connected_passed_pawn(square, Color::White, white_pawns) {
+                            bonus += 30;
+                        }
+                        white_score += bonus;
                     }
                 }
                 Some(Color::Black) => {
@@ -480,7 +561,11 @@ pub fn evaluate(board: &Board) -> i32 {
                     }
 
                     if piece == Piece::Pawn && is_passed_pawn(square_idx, Color::Black, white_pawns) {
-                        black_score += passed_pawn_bonus(square.get_rank().to_index(), Color::Black);
+                        let mut bonus = passed_pawn_bonus(square.get_rank().to_index(), Color::Black);
+                        if is_connected_passed_pawn(square, Color::Black, black_pawns) {
+                            bonus += 30;
+                        }
+                        black_score += bonus;
                     }
                 }
                 None => {}
@@ -552,6 +637,18 @@ pub fn evaluate(board: &Board) -> i32 {
     } else if black_material > white_material {
         black_score += evaluate_mating_endgame(black_king_sq, white_king_sq, black_material, white_material);
     }
+
+    // 6. Piece mobility and knight outposts
+    let not_a_file = 0xfefefefefefefefe;
+    let not_h_file = 0x7f7f7f7f7f7f7f7f;
+    let white_pawn_attacks = BitBoard(((white_pawns & not_a_file) << 7) | ((white_pawns & not_h_file) << 9));
+    let black_pawn_attacks = BitBoard(((black_pawns & not_h_file) >> 7) | ((black_pawns & not_a_file) >> 9));
+
+    let white_safe_squares = !black_pawn_attacks;
+    let black_safe_squares = !white_pawn_attacks;
+
+    white_score += evaluate_mobility_and_outposts(board, Color::White, white_safe_squares, white_pawn_attacks);
+    black_score += evaluate_mobility_and_outposts(board, Color::Black, black_safe_squares, black_pawn_attacks);
 
     let score = white_score - black_score;
 

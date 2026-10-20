@@ -1,4 +1,5 @@
 use crate::eval::{self, piece_value};
+use crate::see;
 use chess::{Board, BoardStatus, ChessMove, Color, MoveGen, Piece};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -170,8 +171,14 @@ fn score_move(
     });
 
     if let Some(vic) = victim {
-        // 2. MVV-LVA (Most Valuable Victim - Least Valuable Aggressor)
-        score += 50_000 + piece_value(vic) * 10 - piece_value(attacker);
+        let see_val = see::see(board, mv);
+        if see_val >= 0 {
+            // Winning or equal capture: top priority
+            score += 50_000 + piece_value(vic) * 10 - piece_value(attacker);
+        } else {
+            // Losing capture: search after killers and good quiet moves
+            score += -10_000 + see_val;
+        }
     } else {
         // 3. Killer moves
         if killers[0] == Some(*mv) {
@@ -219,7 +226,7 @@ fn quiescence(searcher: &mut Searcher, board: &Board, mut alpha: i32, beta: i32)
     }
 
     let mut tactical_moves: Vec<ChessMove> = MoveGen::new_legal(board)
-        .filter(|mv| is_tactical(board, mv))
+        .filter(|mv| is_tactical(board, mv) && (mv.get_promotion().is_some() || see::see(board, mv) >= 0))
         .collect();
 
     order_moves(board, &mut tactical_moves, None, &[None, None], &searcher.history);
@@ -275,6 +282,22 @@ fn negamax(
 
     if depth <= 0 && extension == 0 {
         return quiescence(searcher, board, alpha, beta);
+    }
+
+    let static_eval = if !in_check {
+        Some(eval::evaluate(board))
+    } else {
+        None
+    };
+
+    // --- Reverse Futility Pruning (RFP / Static Null Move Pruning) ---
+    if allow_null && !in_check && depth <= 3 && ply > 0 && beta.abs() < 25000 {
+        if let Some(eval_val) = static_eval {
+            let margin = 75 * depth;
+            if eval_val - margin >= beta {
+                return beta; // Pruned!
+            }
+        }
     }
 
     // --- Null-Move Pruning (NMP) ---
@@ -349,6 +372,21 @@ fn negamax(
         let new_board = board.make_move_new(mv);
         let is_tactical_move = is_tactical(board, &mv);
         let gives_check = new_board.checkers().popcnt() > 0;
+
+        // --- Futility Pruning (FP) at frontier depth ---
+        if depth == 1
+            && moves_searched > 1
+            && !in_check
+            && !is_tactical_move
+            && !gives_check
+            && alpha.abs() < 25000
+        {
+            if let Some(eval_val) = static_eval {
+                if eval_val + 150 <= alpha {
+                    continue; // Skip quiet moves that cannot raise alpha
+                }
+            }
+        }
 
         searcher.pos_history.push(new_board.get_hash());
 
@@ -509,51 +547,77 @@ pub fn search(
         let mut best_move_this_iteration = None;
         let mut best_score_this_iteration = -50000;
 
-        // Aspiration Windows: narrow search window around previous iteration score at depth >= 4
-        let (mut alpha, mut beta) = if depth >= 4 && prev_score.abs() < 25000 {
-            (prev_score - 50, prev_score + 50)
+        let mut delta = 35;
+        let mut alpha = if depth >= 4 && prev_score.abs() < 25000 {
+            (prev_score - delta).max(-50000)
         } else {
-            (-50000, 50000)
+            -50000
+        };
+        let mut beta = if depth >= 4 && prev_score.abs() < 25000 {
+            (prev_score + delta).min(50000)
+        } else {
+            50000
         };
 
-        let mut root_moves_searched = 0;
-        for &mv in &legal_moves {
-            root_moves_searched += 1;
-            let new_board = board.make_move_new(mv);
-            searcher.pos_history.push(new_board.get_hash());
+        loop {
+            let alpha_orig = alpha;
+            let beta_orig = beta;
 
-            let mut score = if root_moves_searched == 1 {
-                -negamax(&mut searcher, &new_board, depth - 1, 1, -beta, -alpha, true)
-            } else {
-                let mut s = -negamax(&mut searcher, &new_board, depth - 1, 1, -alpha - 1, -alpha, true);
-                if s > alpha && s < beta {
-                    s = -negamax(&mut searcher, &new_board, depth - 1, 1, -beta, -alpha, true);
+            let mut root_moves_searched = 0;
+            let mut current_best_score = -50000;
+            let mut current_best_move = None;
+
+            for &mv in &legal_moves {
+                root_moves_searched += 1;
+                let new_board = board.make_move_new(mv);
+                searcher.pos_history.push(new_board.get_hash());
+
+                let score = if root_moves_searched == 1 {
+                    -negamax(&mut searcher, &new_board, depth - 1, 1, -beta, -alpha, true)
+                } else {
+                    let mut s = -negamax(&mut searcher, &new_board, depth - 1, 1, -alpha - 1, -alpha, true);
+                    if s > alpha && s < beta {
+                        s = -negamax(&mut searcher, &new_board, depth - 1, 1, -beta, -alpha, true);
+                    }
+                    s
+                };
+
+                searcher.pos_history.pop();
+
+                if stop_signal.load(Ordering::Relaxed) {
+                    break;
                 }
-                s
-            };
 
-            // Re-search with full window if aspiration window failed
-            if score <= alpha && alpha > -50000 {
-                alpha = -50000;
-                score = -negamax(&mut searcher, &new_board, depth - 1, 1, -beta, -alpha, true);
-            } else if score >= beta && beta < 50000 {
-                beta = 50000;
-                score = -negamax(&mut searcher, &new_board, depth - 1, 1, -beta, -alpha, true);
+                if score > current_best_score {
+                    current_best_score = score;
+                    current_best_move = Some(mv);
+                }
+
+                if score > alpha {
+                    alpha = score;
+                }
+
+                if score >= beta {
+                    break;
+                }
             }
-
-            searcher.pos_history.pop();
 
             if stop_signal.load(Ordering::Relaxed) {
                 break;
             }
 
-            if score > best_score_this_iteration {
-                best_score_this_iteration = score;
-                best_move_this_iteration = Some(mv);
-            }
-
-            if score > alpha {
-                alpha = score;
+            if current_best_score <= alpha_orig && alpha_orig > -50000 {
+                alpha = (alpha - delta).max(-50000);
+                delta += delta / 2;
+                continue;
+            } else if current_best_score >= beta_orig && beta_orig < 50000 {
+                beta = (beta + delta).min(50000);
+                delta += delta / 2;
+                continue;
+            } else {
+                best_score_this_iteration = current_best_score;
+                best_move_this_iteration = current_best_move;
+                break;
             }
         }
 

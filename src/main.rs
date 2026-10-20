@@ -1,6 +1,7 @@
 mod book;
 mod eval;
 mod search;
+mod see;
 mod uci;
 
 use uci::UciHandler;
