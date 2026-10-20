@@ -4,13 +4,25 @@ on:
   push:
     branches: [ 'main' ]
     paths:
-      - '**.rs'
-      - '**.yaml'
-      - '**.yml'
-      - '**.toml'
-      - '**.lock'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+    paths-ignore:
+      - 'README.md'
+      - 'assets/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [ 'main' ]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+    paths-ignore:
+      - 'README.md'
+      - 'assets/**'
+      - 'LICENSE'
+      - '.gitignore'
 
 env:
   CARGO_TERM_COLOR: always
