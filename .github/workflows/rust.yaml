@@ -7,6 +7,7 @@ on:
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.github/workflows/**'
     paths-ignore:
       - 'README.md'
       - 'assets/**'
@@ -18,6 +19,7 @@ on:
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.github/workflows/**'
     paths-ignore:
       - 'README.md'
       - 'assets/**'
@@ -111,3 +113,11 @@ jobs:
             - Windows: `athena-chess-windows-x86_64.exe`
             - Linux: `athena-chess-linux-x86_64`
             - macOS (Apple Silicon): `athena-chess-macos-arm64`
+
+      - name: Delete older releases
+        uses: dev-drprasad/delete-older-releases@v0.3.3
+        with:
+          keep_latest: 1
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
