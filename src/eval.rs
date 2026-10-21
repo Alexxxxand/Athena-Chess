@@ -1,4 +1,4 @@
-use chess::{BitBoard, Board, Color, File, Piece, Rank, Square, get_bishop_moves, get_knight_moves, get_rook_moves};
+use chess::{BitBoard, Board, Color, File, Piece, Rank, Square, get_bishop_moves, get_king_moves, get_knight_moves, get_rook_moves};
 
 pub const PAWN_VALUE: i32 = 100;
 pub const KNIGHT_VALUE: i32 = 320;
@@ -216,13 +216,17 @@ fn is_connected_passed_pawn(square: Square, color: Color, our_pawns: u64) -> boo
     false
 }
 
-/// King safety and pawn shield evaluation
+/// King safety, pawn shield and king ring pressure evaluation
 fn evaluate_king_safety(board: &Board, king_sq: Square, color: Color) -> i32 {
     let enemy_color = !color;
-    let enemy_has_queen = (board.pieces(Piece::Queen) & board.color_combined(enemy_color)).popcnt() > 0;
-    let enemy_has_heavy = enemy_has_queen || (board.pieces(Piece::Rook) & board.color_combined(enemy_color)).popcnt() > 0;
+    let enemy_queens = board.pieces(Piece::Queen) & board.color_combined(enemy_color);
+    let enemy_rooks = board.pieces(Piece::Rook) & board.color_combined(enemy_color);
+    let enemy_bishops = board.pieces(Piece::Bishop) & board.color_combined(enemy_color);
+    let enemy_knights = board.pieces(Piece::Knight) & board.color_combined(enemy_color);
+
+    let enemy_has_heavy = enemy_queens.popcnt() > 0 || enemy_rooks.popcnt() > 0;
     if !enemy_has_heavy {
-        return 0; // Without heavy pieces, back-rank threats are minimal
+        return 0; // Without heavy pieces, back-rank / mating threats are minimal
     }
 
     let mut score = 0;
@@ -234,92 +238,202 @@ fn evaluate_king_safety(board: &Board, king_sq: Square, color: Color) -> i32 {
             // White kingside castle (g1, h1)
             if (file == File::G || file == File::H) && rank == Rank::First {
                 let f2 = Square::make_square(Rank::Second, File::F);
+                let f3 = Square::make_square(Rank::Third, File::F);
                 let g2 = Square::make_square(Rank::Second, File::G);
+                let g3 = Square::make_square(Rank::Third, File::G);
                 let h2 = Square::make_square(Rank::Second, File::H);
                 let h3 = Square::make_square(Rank::Third, File::H);
 
-                if board.piece_on(f2) != Some(Piece::Pawn) || board.color_on(f2) != Some(Color::White) {
-                    score -= 30; // Weak f2
-                }
-                if board.piece_on(g2) != Some(Piece::Pawn) || board.color_on(g2) != Some(Color::White) {
-                    score -= 55; // Open g-file in front of king
+                // F-pawn
+                if board.piece_on(f2) == Some(Piece::Pawn) && board.color_on(f2) == Some(Color::White) {
+                    // Solid f2
+                } else if board.piece_on(f3) == Some(Piece::Pawn) && board.color_on(f3) == Some(Color::White) {
+                    score -= 15; // Slightly weakened f-file
+                } else {
+                    score -= 35; // Open f-file
                 }
 
-                // King's "Luft" (escape square)
-                let has_h2 = board.piece_on(h2) == Some(Piece::Pawn) && board.color_on(h2) == Some(Color::White);
-                let has_h3 = board.piece_on(h3) == Some(Piece::Pawn) && board.color_on(h3) == Some(Color::White);
+                // G-pawn
+                if board.piece_on(g2) == Some(Piece::Pawn) && board.color_on(g2) == Some(Color::White) {
+                    // Solid g2
+                } else if board.piece_on(g3) == Some(Piece::Pawn) && board.color_on(g3) == Some(Color::White) {
+                    score -= 10; // Fianchetto or blocking g3 pawn (not an open file)
+                } else {
+                    score -= 55; // Open g-file directly facing king
+                }
 
-                if has_h3 {
-                    score += 25; // Bonus for safe Luft
-                } else if !has_h2 {
-                    score -= 20; // Missing h-pawn leaves flank exposed
+                // H-pawn & Luft
+                if board.piece_on(h3) == Some(Piece::Pawn) && board.color_on(h3) == Some(Color::White) {
+                    score += 20; // Safe Luft
+                } else if board.piece_on(h2) == Some(Piece::Pawn) && board.color_on(h2) == Some(Color::White) {
+                    // Solid h2
+                } else {
+                    score -= 20; // Missing h-pawn
                 }
             } else if (file == File::B || file == File::C) && rank == Rank::First {
                 // White queenside castle (b1, c1)
                 let b2 = Square::make_square(Rank::Second, File::B);
+                let b3 = Square::make_square(Rank::Third, File::B);
                 let a2 = Square::make_square(Rank::Second, File::A);
                 let a3 = Square::make_square(Rank::Third, File::A);
 
-                if board.piece_on(b2) != Some(Piece::Pawn) || board.color_on(b2) != Some(Color::White) {
-                    score -= 40;
+                if board.piece_on(b2) == Some(Piece::Pawn) && board.color_on(b2) == Some(Color::White) {
+                    // Solid b2
+                } else if board.piece_on(b3) == Some(Piece::Pawn) && board.color_on(b3) == Some(Color::White) {
+                    score -= 10;
+                } else {
+                    score -= 40; // Open b-file
                 }
-                let has_a2 = board.piece_on(a2) == Some(Piece::Pawn) && board.color_on(a2) == Some(Color::White);
-                let has_a3 = board.piece_on(a3) == Some(Piece::Pawn) && board.color_on(a3) == Some(Color::White);
 
-                if has_a3 {
-                    score += 20; // Queenside Luft (a3)
-                } else if !has_a2 {
+                if board.piece_on(a3) == Some(Piece::Pawn) && board.color_on(a3) == Some(Color::White) {
+                    score += 20;
+                } else if board.piece_on(a2) == Some(Piece::Pawn) && board.color_on(a2) == Some(Color::White) {
+                    // Solid a2
+                } else {
                     score -= 20;
                 }
-            } else if (file == File::D || file == File::E) && rank == Rank::First {
-                // King trapped uncastled in center
-                score -= 60;
+            } else if rank == Rank::First {
+                if file == File::D || file == File::E {
+                    // King uncastled in center
+                    score -= 60;
+                } else if file == File::F {
+                    // King displaced to f1 (lost castling, blocking rook, exposed)
+                    score -= 85;
+                } else {
+                    score -= 50;
+                }
+            } else if rank == Rank::Second {
+                // King on 2nd rank while heavy pieces exist
+                score -= 95;
+            } else {
+                // King wandered to 3rd rank or higher
+                score -= 140;
             }
         }
         Color::Black => {
             // Black kingside castle (g8, h8)
             if (file == File::G || file == File::H) && rank == Rank::Eighth {
                 let f7 = Square::make_square(Rank::Seventh, File::F);
+                let f6 = Square::make_square(Rank::Sixth, File::F);
                 let g7 = Square::make_square(Rank::Seventh, File::G);
+                let g6 = Square::make_square(Rank::Sixth, File::G);
                 let h7 = Square::make_square(Rank::Seventh, File::H);
                 let h6 = Square::make_square(Rank::Sixth, File::H);
 
-                if board.piece_on(f7) != Some(Piece::Pawn) || board.color_on(f7) != Some(Color::Black) {
-                    score -= 30;
+                // F-pawn
+                if board.piece_on(f7) == Some(Piece::Pawn) && board.color_on(f7) == Some(Color::Black) {
+                    // Solid f7
+                } else if board.piece_on(f6) == Some(Piece::Pawn) && board.color_on(f6) == Some(Color::Black) {
+                    score -= 15;
+                } else {
+                    score -= 35;
                 }
-                if board.piece_on(g7) != Some(Piece::Pawn) || board.color_on(g7) != Some(Color::Black) {
+
+                // G-pawn
+                if board.piece_on(g7) == Some(Piece::Pawn) && board.color_on(g7) == Some(Color::Black) {
+                    // Solid g7
+                } else if board.piece_on(g6) == Some(Piece::Pawn) && board.color_on(g6) == Some(Color::Black) {
+                    score -= 10;
+                } else {
                     score -= 55;
                 }
 
-                // Black's Luft (escape square)
-                let has_h7 = board.piece_on(h7) == Some(Piece::Pawn) && board.color_on(h7) == Some(Color::Black);
-                let has_h6 = board.piece_on(h6) == Some(Piece::Pawn) && board.color_on(h6) == Some(Color::Black);
-
-                if has_h6 {
-                    score += 25; // Bonus for h6 Luft
-                } else if !has_h7 {
+                // H-pawn & Luft
+                if board.piece_on(h6) == Some(Piece::Pawn) && board.color_on(h6) == Some(Color::Black) {
+                    score += 20;
+                } else if board.piece_on(h7) == Some(Piece::Pawn) && board.color_on(h7) == Some(Color::Black) {
+                    // Solid h7
+                } else {
                     score -= 20;
                 }
             } else if (file == File::B || file == File::C) && rank == Rank::Eighth {
-                // Black queenside castle
+                // Black queenside castle (b8, c8)
                 let b7 = Square::make_square(Rank::Seventh, File::B);
+                let b6 = Square::make_square(Rank::Sixth, File::B);
                 let a7 = Square::make_square(Rank::Seventh, File::A);
                 let a6 = Square::make_square(Rank::Sixth, File::A);
 
-                if board.piece_on(b7) != Some(Piece::Pawn) || board.color_on(b7) != Some(Color::Black) {
+                if board.piece_on(b7) == Some(Piece::Pawn) && board.color_on(b7) == Some(Color::Black) {
+                    // Solid b7
+                } else if board.piece_on(b6) == Some(Piece::Pawn) && board.color_on(b6) == Some(Color::Black) {
+                    score -= 10;
+                } else {
                     score -= 40;
                 }
-                let has_a7 = board.piece_on(a7) == Some(Piece::Pawn) && board.color_on(a7) == Some(Color::Black);
-                let has_a6 = board.piece_on(a6) == Some(Piece::Pawn) && board.color_on(a6) == Some(Color::Black);
 
-                if has_a6 {
-                    score += 20; // Queenside Luft (a6)
-                } else if !has_a7 {
+                if board.piece_on(a6) == Some(Piece::Pawn) && board.color_on(a6) == Some(Color::Black) {
+                    score += 20;
+                } else if board.piece_on(a7) == Some(Piece::Pawn) && board.color_on(a7) == Some(Color::Black) {
+                    // Solid a7
+                } else {
                     score -= 20;
                 }
-            } else if (file == File::D || file == File::E) && rank == Rank::Eighth {
-                // King trapped in center
-                score -= 60;
+            } else if rank == Rank::Eighth {
+                if file == File::D || file == File::E {
+                    score -= 60;
+                } else if file == File::F {
+                    score -= 85;
+                } else {
+                    score -= 50;
+                }
+            } else if rank == Rank::Seventh {
+                score -= 95;
+            } else {
+                score -= 140;
+            }
+        }
+    }
+
+    // King Ring Pressure (attacks directed at squares adjacent to king)
+    let king_ring = get_king_moves(king_sq) | BitBoard::from_square(king_sq);
+    let occupied = *board.combined();
+
+    let mut attacker_count = 0;
+    let mut attack_weight = 0;
+
+    for q_sq in enemy_queens {
+        let attacks = get_bishop_moves(q_sq, occupied) | get_rook_moves(q_sq, occupied);
+        if (attacks & king_ring).0 != 0 {
+            attacker_count += 1;
+            attack_weight += 50;
+        }
+    }
+
+    for r_sq in enemy_rooks {
+        let attacks = get_rook_moves(r_sq, occupied);
+        if (attacks & king_ring).0 != 0 {
+            attacker_count += 1;
+            attack_weight += 30;
+        }
+    }
+
+    for b_sq in enemy_bishops {
+        let attacks = get_bishop_moves(b_sq, occupied);
+        if (attacks & king_ring).0 != 0 {
+            attacker_count += 1;
+            attack_weight += 20;
+        }
+    }
+
+    for k_sq in enemy_knights {
+        let attacks = get_knight_moves(k_sq);
+        if (attacks & king_ring).0 != 0 {
+            attacker_count += 1;
+            attack_weight += 20;
+        }
+    }
+
+    if attacker_count >= 2 {
+        let ring_danger = (attack_weight * attack_weight) / 100;
+        score -= ring_danger;
+
+        // Extra penalty if defending queen is far away from king under attack
+        let our_queens = board.pieces(Piece::Queen) & board.color_combined(color);
+        for q_sq in our_queens {
+            let df = (q_sq.get_file().to_index() as i32 - file.to_index() as i32).abs();
+            let dr = (q_sq.get_rank().to_index() as i32 - rank.to_index() as i32).abs();
+            if df.max(dr) >= 4 {
+                score -= 40; // Defending queen abandoned the king!
             }
         }
     }
